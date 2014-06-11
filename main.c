@@ -19,6 +19,7 @@ void
 init_pwm_timer(void);
 void
 init_USART(void);
+void TWI_init();
 //asservisement function every 20ms
 void Timer1_asserv_init(void);
 //Timer un counter mode for count the motor tick
@@ -31,8 +32,8 @@ volatile int Consigne_V = 25; // 25 cm/s
 volatile double nb_tick = 0;
 volatile char receivechar;
 volatile char a = 0;
+volatile int data;
 int main() {
-
 	initPort();
 
 	Timer1_asserv_init();
@@ -44,7 +45,7 @@ int main() {
 //salut
 
 	init_USART();
-
+	TWI_init();
 
 	PRR1 |= 1<<PRUSB; // When we allow interupt with sei() The the AVR gets a USB interrupt and
 	sei();           // vectors off to __bad_interupt(), which ... restarts the application.
@@ -66,7 +67,13 @@ int main() {
 }
 
 
-
+void TWI_init()
+{
+	  TWSR = 0x00;    // no prescaler
+	  TWBR = 72; // 100kHz @16Mhz
+	  //TWBR = 0x0C;    // 400 KHz @16MHz
+	  TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWIE) | (1 << TWINT);
+}
 
 void initPort(void) {
 	DDRC |= (1 << PORTC7); //LED
@@ -79,7 +86,7 @@ void initPort(void) {
 
 	DDRD &= ~(1 << PORTD2); // initialize pin PD2 input pin -> Rx for reception
 	DDRD |= (1 << PORTD3); // initialize pin PD3 output pin -> Tx for transmission
-
+	PORTD = (1 << PD0) | (1 << PD1); // activate internal pull_ups for twi
 }
 void init_pwm_timer(void) {
 	/* set timer3 prescale factor to 64 */
@@ -91,9 +98,23 @@ void init_pwm_timer(void) {
 	TCCR3A |= (1 << COM3A1);
 
 }
-
+void TWIStart(void)
+{
+	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
+	while (!(TWCR & (1 << TWINT)));
+}
+//send stop signal
+void TWIStop(void)
+{
+    TWCR = (1<<TWINT)|(1<<TWSTO)|(1<<TWEN);
+}
 //F=100hz, every 10ms more or less
-
+void TWIWrite(uint8_t u8data)
+{
+    TWDR = u8data;
+    TWCR = (1<<TWINT)|(1<<TWEN);
+    while ((TWCR & (1<<TWINT)) == 0);
+}
 
 void init_USART(void) {
 
@@ -113,14 +134,31 @@ ISR(USART1_RX_vect) {
 
 	receivechar = UDR1;
 }
-
+ISR(TWI_vect)
+{
+	  TWDR = data;
+}
 ISR(TIMER1_COMPA_vect) {
 
-PORTC|=(1<<PORTC7);
+
 
 		float S_error = 0, error = 0, D_error = 0, PWM = 0, last_error = 0;
 		double tick;
 		float Dist;
+
+		TWIStart(); // envois start et adresse
+
+		TWIWrite(0b00000000); // Address brodcast
+		TWIWrite(1); // Adresse memoire
+
+		_delay_ms(10);
+		nb_tick=data;
+
+		TWIStop();
+if (nb_tick>3)
+{
+	PORTC|=(1<<PORTC7);
+}
 		tick=nb_tick;// Storage number of tick
 		nb_tick=0; // clean count of tick
 		Dist = nb_tick* 0.005852; // To calculate
